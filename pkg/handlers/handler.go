@@ -8,8 +8,9 @@ import (
 	"net/http"
 	"os"
 
-	"gitea-devops-shared-threefld-cicd.apps.c4.us-east-1.dev.aws.ocp.14west.io/threefld/golang-simple-oc4service/pkg/connectors"
-	"gitea-devops-shared-threefld-cicd.apps.c4.us-east-1.dev.aws.ocp.14west.io/threefld/golang-simple-oc4service/pkg/schema"
+	"github.com/luigizuccarelli/golang-eventbus-grpc/pkg/connectors"
+	"github.com/luigizuccarelli/golang-eventbus-grpc/pkg/eventbus"
+	"github.com/luigizuccarelli/golang-eventbus-grpc/pkg/schema"
 )
 
 const (
@@ -17,7 +18,8 @@ const (
 	APPLICATIONJSON string = "application/json"
 )
 
-func EchoHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients) {
+// ServiceHandler - uses the client connection and rpcServer as parameters
+func ServiceHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients, rpcServer *eventbus.Server) {
 	var response *schema.Response
 	var req *schema.Request
 
@@ -27,7 +29,7 @@ func EchoHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients
 	}
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		msg := "EchoHandler body data error %v"
+		msg := "ServiceHandler body data error %v"
 		b := responseErrorFormat(http.StatusInternalServerError, w, msg, err)
 		fmt.Fprintf(w, string(b))
 		return
@@ -38,7 +40,7 @@ func EchoHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients
 	// unmarshal result from mw backend
 	errs := json.Unmarshal(body, &req)
 	if errs != nil {
-		msg := "EchoHandler could not unmarshal input data from servisBOT to schema %v"
+		msg := "ServiceHandler could not unmarshal input data to schema %v"
 		conn.Error(msg, errs)
 		b := responseErrorFormat(http.StatusInternalServerError, w, msg, errs)
 		fmt.Fprintf(w, string(b))
@@ -46,8 +48,14 @@ func EchoHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients
 	}
 	response = &schema.Response{Code: http.StatusOK, Status: "OK", Message: req.Message}
 	b, _ := json.MarshalIndent(response, "", "	")
-	conn.Debug(fmt.Sprintf("EchoHandler response : %s", string(b)))
-	fmt.Fprintf(w, string(b))
+	conn.Debug(fmt.Sprintf("ServiceHandler response : %s", string(b)))
+	// we got here so this means we can fire off our publish events
+	// iterate through each suscriber topic
+	for topic, _ := range rpcServer.Subscribers {
+		rpcServer.EventBus().Publish(topic, conn)
+		conn.Info("ServiceHandler published event for topic %s", topic)
+	}
+	fmt.Fprintf(w, "%s", string(b))
 }
 
 func IsAlive(w http.ResponseWriter, r *http.Request) {

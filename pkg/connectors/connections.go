@@ -1,7 +1,10 @@
+// +build real
+
 package connectors
 
 import (
 	"fmt"
+	"net/rpc"
 
 	"github.com/microlib/simple"
 )
@@ -9,6 +12,10 @@ import (
 // Connections struct - all backend connections in a common object
 type Connectors struct {
 	Logger *simple.Logger
+}
+
+type RPCClient struct {
+	Connector *rpc.Client
 }
 
 func NewClientConnections(logger *simple.Logger) Clients {
@@ -29,4 +36,12 @@ func (c *Connectors) Debug(msg string, val ...interface{}) {
 
 func (c *Connectors) Trace(msg string, val ...interface{}) {
 	c.Logger.Trace(fmt.Sprintf(msg, val...))
+}
+
+func (c *Connectors) DialHttpPath(addr string, path string) (*RPCClient, error) {
+	client, err := rpc.DialHTTPPath("tcp", addr, path)
+	if err != nil {
+		return &RPCClient{}, err
+	}
+	return &RPCClient{Connector: client}, nil
 }

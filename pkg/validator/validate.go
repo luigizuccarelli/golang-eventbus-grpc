@@ -33,6 +33,7 @@ func ValidateEnvars(logger *simple.Logger) error {
 		"NAME,false",
 		"SERVER_PORT,true",
 		"VERSION,true",
+		"RPCSERVER_PORT,true",
 	}
 	for x := range items {
 		if err := checkEnvar(items[x], logger); err != nil {

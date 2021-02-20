@@ -1,44 +1,39 @@
+// +build real
+
 package main
 
 import (
 	"net/http"
 	"os"
 
-	"gitea-devops-shared-threefld-cicd.apps.c4.us-east-1.dev.aws.ocp.14west.io/threefld/golang-simple-oc4service/pkg/connectors"
-	"gitea-devops-shared-threefld-cicd.apps.c4.us-east-1.dev.aws.ocp.14west.io/threefld/golang-simple-oc4service/pkg/handlers"
-	"gitea-devops-shared-threefld-cicd.apps.c4.us-east-1.dev.aws.ocp.14west.io/threefld/golang-simple-oc4service/pkg/validator"
 	"github.com/gorilla/mux"
+	"github.com/luigizuccarelli/golang-eventbus-grpc/pkg/connectors"
+	"github.com/luigizuccarelli/golang-eventbus-grpc/pkg/eventbus"
+	"github.com/luigizuccarelli/golang-eventbus-grpc/pkg/handlers"
+	"github.com/luigizuccarelli/golang-eventbus-grpc/pkg/validator"
 	"github.com/microlib/simple"
 )
 
-var (
-	logger *simple.Logger
-)
+func startServers(conn connectors.Clients) *http.Server {
+	// start the rpc server first
+	rpcServer := eventbus.NewServer(os.Getenv("RPCSERVER_PORT"), "/_server_bus_", eventbus.New())
+	rpcServer.Start(conn)
 
-func startHttpServer(con connectors.Clients) *http.Server {
 	srv := &http.Server{Addr: ":" + os.Getenv("SERVER_PORT")}
-
 	r := mux.NewRouter()
-
-	r.HandleFunc("/api/v1/echo", func(w http.ResponseWriter, req *http.Request) {
-		handlers.EchoHandler(w, req, con)
+	r.HandleFunc("/api/v1/service", func(w http.ResponseWriter, req *http.Request) {
+		handlers.ServiceHandler(w, req, conn, rpcServer)
 	}).Methods("POST", "OPTIONS")
-
 	r.HandleFunc("/api/v1/sys/info/isalive", handlers.IsAlive).Methods("GET")
-
-	sh := http.StripPrefix("/api/v1/api-docs", http.FileServer(http.Dir("./swaggerui")))
-	r.PathPrefix("/api/v1/api-docs").Handler(sh)
-
 	http.Handle("/", r)
-
 	if err := srv.ListenAndServe(); err != nil {
-		con.Error("Httpserver: ListenAndServe() error: " + err.Error())
+		conn.Error("Httpserver: ListenAndServe() error: " + err.Error())
 	}
-
 	return srv
 }
 
 func main() {
+	var logger *simple.Logger
 	if os.Getenv("LOG_LEVEL") == "" {
 		logger = &simple.Logger{Level: "info"}
 	} else {
@@ -49,6 +44,6 @@ func main() {
 		os.Exit(-1)
 	}
 	conn := connectors.NewClientConnections(logger)
-	srv := startHttpServer(conn)
-	logger.Info("Starting server on port " + srv.Addr)
+	srv := startServers(conn)
+	conn.Info("Starting server on port " + srv.Addr)
 }
