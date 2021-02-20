@@ -3,10 +3,14 @@
 all: clean test build
 
 build: 
-	go build -o build ./...
+	go build -o build -tags real ./...
+
+build-arm64:
+	mkdir -p buildarm
+	GOOS=linux GOARCH=arm64 go build -o buildarm -ldflags="-s -w" -tags real ./...
 
 test:
-	go test -v -coverprofile=tests/results/cover.out ./...
+	go test -v -coverprofile=tests/results/cover.out -tags fake ./...
 
 cover:
 	go tool cover -html=tests/results/cover.out -o tests/results/cover.html

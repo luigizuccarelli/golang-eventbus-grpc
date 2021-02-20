@@ -3,6 +3,7 @@
 <html>
 	<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>eventbus: Go Coverage Report</title>
 		<style>
 			body {
 				background: black;
@@ -54,9 +55,15 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">gitea-cicd.apps.aws2-dev.ocp.14west.io/cicd/golang-simple-oc4service/pkg/handlers/handler.go (94.4%)</option>
+				<option value="file0">github.com/luigizuccarelli/golang-eventbus-grpc/pkg/eventbus/client.go (82.6%)</option>
 				
-				<option value="file1">gitea-cicd.apps.aws2-dev.ocp.14west.io/cicd/golang-simple-oc4service/pkg/validator/validate.go (100.0%)</option>
+				<option value="file1">github.com/luigizuccarelli/golang-eventbus-grpc/pkg/eventbus/event_bus.go (91.3%)</option>
+				
+				<option value="file2">github.com/luigizuccarelli/golang-eventbus-grpc/pkg/eventbus/server.go (81.5%)</option>
+				
+				<option value="file3">github.com/luigizuccarelli/golang-eventbus-grpc/pkg/handlers/handler.go (89.7%)</option>
+				
+				<option value="file4">github.com/luigizuccarelli/golang-eventbus-grpc/pkg/validator/validate.go (92.9%)</option>
 				
 				</select>
 			</div>
@@ -70,7 +77,511 @@
 		</div>
 		<div id="content">
 		
-		<pre class="file" id="file0" style="display: none">package handlers
+		<pre class="file" id="file0" style="display: none">package eventbus
+
+import (
+        "errors"
+        "net"
+        "net/http"
+        "net/rpc"
+        "sync"
+
+        "github.com/luigizuccarelli/golang-eventbus-grpc/pkg/connectors"
+        "github.com/luigizuccarelli/golang-eventbus-grpc/pkg/schema"
+)
+
+const (
+        // PublishService - Client service method
+        PUBLISHSERVICE = "ClientService.PushEvent"
+)
+
+// we have t make this local
+
+// Client - object capable of subscribing to a remote event bus
+type Client struct {
+        eventBus Bus
+        address  string
+        path     string
+        service  *ClientService
+}
+
+// ClientService - service object listening to events published in a remote event bus
+type ClientService struct {
+        client  *Client
+        wg      *sync.WaitGroup
+        started bool
+}
+
+// NewClient - create a client object with the address and server path
+func NewClient(address, path string, eventBus Bus) *Client <span class="cov8" title="1">{
+        client := new(Client)
+        client.eventBus = eventBus
+        client.address = address
+        client.path = path
+        client.service = &amp;ClientService{client, &amp;sync.WaitGroup{}, false}
+        return client
+}</span>
+
+// EventBus - returns the underlying event bus
+func (client *Client) EventBus() Bus <span class="cov8" title="1">{
+        return client.eventBus
+}</span>
+
+// added lmz
+func (client *Client) Unsubscribe(topic string, fn interface{}) <span class="cov8" title="1">{
+        client.eventBus.Unsubscribe(topic, fn)
+}</span>
+
+func (client *Client) doSubscribe(topic string, fn interface{}, serverAddr, serverPath string, subscribeType schema.SubscribeType, conn connectors.Clients) <span class="cov8" title="1">{
+        defer func() </span><span class="cov8" title="1">{
+                if r := recover(); r != nil </span><span class="cov0" title="0">{
+                        conn.Error("Server not found: %v", r)
+                }</span>
+        }()
+
+        <span class="cov8" title="1">rpcClient, err := conn.DialHttpPath(serverAddr, serverPath)
+        defer rpcClient.Connector.Close()
+        if err != nil </span><span class="cov0" title="0">{
+                conn.Error("dialing: %v", err)
+        }</span>
+        <span class="cov8" title="1">args := &amp;schema.SubscribeArg{client.address, client.path, PUBLISHSERVICE, subscribeType, topic}
+        reply := new(bool)
+        err = rpcClient.Connector.Call(REGISTERSERVICE, args, reply)
+        if err != nil </span><span class="cov0" title="0">{
+                conn.Error("Register error: %v", err)
+        }</span>
+        <span class="cov8" title="1">if *reply </span><span class="cov0" title="0">{
+                client.eventBus.Subscribe(client.path, topic, fn)
+        }</span>
+}
+
+//Subscribe subscribes to a topic in a remote event bus
+func (client *Client) Subscribe(topic string, fn interface{}, serverAddr, serverPath string, conn connectors.Clients) <span class="cov8" title="1">{
+        client.doSubscribe(topic, fn, serverAddr, serverPath, Subscribe, conn)
+}</span>
+
+//SubscribeOnce subscribes once to a topic in a remote event bus
+func (client *Client) SubscribeOnce(topic string, fn interface{}, serverAddr, serverPath string, conn connectors.Clients) <span class="cov8" title="1">{
+        client.doSubscribe(topic, fn, serverAddr, serverPath, SubscribeOnce, conn)
+}</span>
+
+// Start - starts the client service to listen to remote events
+func (client *Client) Start(conn connectors.Clients) error <span class="cov8" title="1">{
+        var err error
+        service := client.service
+        if !service.started </span><span class="cov8" title="1">{
+                server := rpc.NewServer()
+                server.Register(service)
+                server.HandleHTTP(client.path, "/debug"+client.path)
+                conn.Info("Function Start : info %v", client)
+                l, err := net.Listen("tcp", client.address)
+                if err == nil </span><span class="cov8" title="1">{
+                        service.wg.Add(1)
+                        service.started = true
+                        go http.Serve(l, nil)
+                        conn.Info("Function Start : client server started %s", client.address)
+                }</span>
+        } else<span class="cov0" title="0"> {
+                err = errors.New("Client service already started")
+        }</span>
+        <span class="cov8" title="1">return err</span>
+}
+
+// Stop - signal for the service to stop serving
+func (client *Client) Stop() <span class="cov8" title="1">{
+        service := client.service
+        if service.started </span><span class="cov8" title="1">{
+                service.wg.Done()
+                service.started = false
+        }</span>
+}
+
+// PushEvent - exported service to listening to remote events
+func (service *ClientService) PushEvent(arg *schema.ClientArg, reply *bool) error <span class="cov0" title="0">{
+        service.client.eventBus.Publish(arg.Topic, arg.Args)
+        *reply = true
+        return nil
+}</span>
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package eventbus
+
+import (
+        "fmt"
+        "reflect"
+        "sync"
+)
+
+// we have to keep this local
+
+//BusSubscriber defines subscription-related bus behavior
+type BusSubscriber interface {
+        Subscribe(id string, topic string, fn interface{}) error
+        SubscribeAsync(topic string, fn interface{}, transactional bool) error
+        SubscribeOnce(topic string, fn interface{}) error
+        SubscribeOnceAsync(topic string, fn interface{}) error
+        Unsubscribe(topic string, handler interface{}) error
+        Handler(id string, topic string) (interface{}, error)
+}
+
+//BusPublisher defines publishing-related bus behavior
+type BusPublisher interface {
+        Publish(topic string, args ...interface{})
+}
+
+//BusController defines bus control behavior (checking handler's presence, synchronization)
+type BusController interface {
+        HasCallback(topic string) bool
+        WaitAsync()
+}
+
+//Bus englobes global (subscribe, publish, control) bus behavior
+type Bus interface {
+        BusController
+        BusSubscriber
+        BusPublisher
+}
+
+// EventBus - box for handlers and callbacks.
+type EventBus struct {
+        handlers map[string][]*EventHandler
+        lock     sync.Mutex // a lock for the map
+        wg       sync.WaitGroup
+}
+
+type EventHandler struct {
+        callBack      reflect.Value
+        flagOnce      bool
+        async         bool
+        transactional bool
+        sync.Mutex           // lock for an event handler - useful for running async callbacks serially
+        id            string // set by server
+}
+
+// New returns new EventBus with empty handlers.
+func New() Bus <span class="cov8" title="1">{
+        b := &amp;EventBus{
+                make(map[string][]*EventHandler),
+                sync.Mutex{},
+                sync.WaitGroup{},
+        }
+        return Bus(b)
+}</span>
+
+// doSubscribe handles the subscription logic and is utilized by the public Subscribe functions
+func (bus *EventBus) doSubscribe(topic string, fn interface{}, handler *EventHandler) error <span class="cov8" title="1">{
+        bus.lock.Lock()
+        defer bus.lock.Unlock()
+        if reflect.TypeOf(fn).Kind() != reflect.Func </span><span class="cov8" title="1">{
+                return fmt.Errorf("%s is not of type reflect.Func", reflect.TypeOf(fn).Kind())
+        }</span>
+        <span class="cov8" title="1">bus.handlers[topic] = append(bus.handlers[topic], handler)
+        return nil</span>
+}
+
+// Subscribe subscribes to a topic.
+// Returns error if `fn` is not a function.
+func (bus *EventBus) Subscribe(id string, topic string, fn interface{}) error <span class="cov8" title="1">{
+        return bus.doSubscribe(id, fn, &amp;EventHandler{
+                reflect.ValueOf(fn), false, false, false, sync.Mutex{}, topic,
+        })
+}</span>
+
+// SubscribeAsync subscribes to a topic with an asynchronous callback
+// Transactional determines whether subsequent callbacks for a topic are
+// run serially (true) or concurrently (false)
+// Returns error if `fn` is not a function.
+func (bus *EventBus) SubscribeAsync(topic string, fn interface{}, transactional bool) error <span class="cov8" title="1">{
+        return bus.doSubscribe(topic, fn, &amp;EventHandler{
+                reflect.ValueOf(fn), false, true, transactional, sync.Mutex{}, "",
+        })
+}</span>
+
+// SubscribeOnce subscribes to a topic once. Handler will be removed after executing.
+// Returns error if `fn` is not a function.
+func (bus *EventBus) SubscribeOnce(topic string, fn interface{}) error <span class="cov8" title="1">{
+        return bus.doSubscribe(topic, fn, &amp;EventHandler{
+                reflect.ValueOf(fn), true, false, false, sync.Mutex{}, "",
+        })
+}</span>
+
+// SubscribeOnceAsync subscribes to a topic once with an asynchronous callback
+// Handler will be removed after executing.
+// Returns error if `fn` is not a function.
+func (bus *EventBus) SubscribeOnceAsync(topic string, fn interface{}) error <span class="cov8" title="1">{
+        return bus.doSubscribe(topic, fn, &amp;EventHandler{
+                reflect.ValueOf(fn), true, true, false, sync.Mutex{}, "",
+        })
+}</span>
+
+// HasCallback returns true if exists any callback subscribed to the topic.
+func (bus *EventBus) HasCallback(topic string) bool <span class="cov8" title="1">{
+        bus.lock.Lock()
+        defer bus.lock.Unlock()
+        _, ok := bus.handlers[topic]
+        if ok </span><span class="cov8" title="1">{
+                return len(bus.handlers[topic]) &gt; 0
+        }</span>
+        <span class="cov8" title="1">return false</span>
+}
+
+// Unsubscribe removes callback defined for a topic.
+// Returns error if there are no callbacks subscribed to the topic.
+func (bus *EventBus) Unsubscribe(topic string, handler interface{}) error <span class="cov8" title="1">{
+        bus.lock.Lock()
+        defer bus.lock.Unlock()
+        if _, ok := bus.handlers[topic]; ok &amp;&amp; len(bus.handlers[topic]) &gt; 0 </span><span class="cov8" title="1">{
+                bus.removeHandler(topic, bus.findHandlerIdx(topic, reflect.ValueOf(handler)))
+                return nil
+        }</span>
+        <span class="cov8" title="1">return fmt.Errorf("topic %s doesn't exist", topic)</span>
+}
+
+// Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
+func (bus *EventBus) Publish(topic string, args ...interface{}) <span class="cov8" title="1">{
+        bus.lock.Lock() // will unlock if handler is not found or always after setUpPublish
+        defer bus.lock.Unlock()
+        if handlers, ok := bus.handlers[topic]; ok &amp;&amp; 0 &lt; len(handlers) </span><span class="cov8" title="1">{
+                // Handlers slice may be changed by removeHandler and Unsubscribe during iteration,
+                // so make a copy and iterate the copied slice.
+                copyHandlers := make([]*EventHandler, len(handlers))
+                copy(copyHandlers, handlers)
+                for i, handler := range copyHandlers </span><span class="cov8" title="1">{
+                        if handler.flagOnce </span><span class="cov8" title="1">{
+                                bus.removeHandler(topic, i)
+                        }</span>
+                        <span class="cov8" title="1">if !handler.async </span><span class="cov8" title="1">{
+                                bus.doPublish(handler, topic, args...)
+                        }</span> else<span class="cov8" title="1"> {
+                                bus.wg.Add(1)
+                                if handler.transactional </span><span class="cov8" title="1">{
+                                        bus.lock.Unlock()
+                                        handler.Lock()
+                                        bus.lock.Lock()
+                                }</span>
+                                <span class="cov8" title="1">go bus.doPublishAsync(handler, topic, args...)</span>
+                        }
+                }
+        }
+}
+
+func (bus *EventBus) doPublish(handler *EventHandler, topic string, args ...interface{}) <span class="cov8" title="1">{
+        passedArguments := bus.setUpPublish(handler, args...)
+        handler.callBack.Call(passedArguments)
+}</span>
+
+func (bus *EventBus) doPublishAsync(handler *EventHandler, topic string, args ...interface{}) <span class="cov8" title="1">{
+        defer bus.wg.Done()
+        if handler.transactional </span><span class="cov8" title="1">{
+                defer handler.Unlock()
+        }</span>
+        <span class="cov8" title="1">bus.doPublish(handler, topic, args...)</span>
+}
+
+func (bus *EventBus) removeHandler(topic string, idx int) <span class="cov8" title="1">{
+        if _, ok := bus.handlers[topic]; !ok </span><span class="cov0" title="0">{
+                return
+        }</span>
+        <span class="cov8" title="1">l := len(bus.handlers[topic])
+
+        if !(0 &lt;= idx &amp;&amp; idx &lt; l) </span><span class="cov0" title="0">{
+                return
+        }</span>
+
+        <span class="cov8" title="1">copy(bus.handlers[topic][idx:], bus.handlers[topic][idx+1:])
+        bus.handlers[topic][l-1] = nil // or the zero value of T
+        bus.handlers[topic] = bus.handlers[topic][:l-1]</span>
+}
+
+func (bus *EventBus) findHandlerIdx(topic string, callback reflect.Value) int <span class="cov8" title="1">{
+        if _, ok := bus.handlers[topic]; ok </span><span class="cov8" title="1">{
+                for idx, handler := range bus.handlers[topic] </span><span class="cov8" title="1">{
+                        if handler.callBack.Type() == callback.Type() &amp;&amp;
+                                handler.callBack.Pointer() == callback.Pointer() </span><span class="cov8" title="1">{
+                                return idx
+                        }</span>
+                }
+        }
+        <span class="cov0" title="0">return -1</span>
+}
+
+func (bus *EventBus) setUpPublish(callback *EventHandler, args ...interface{}) []reflect.Value <span class="cov8" title="1">{
+        funcType := callback.callBack.Type()
+        passedArguments := make([]reflect.Value, len(args))
+        for i, v := range args </span><span class="cov8" title="1">{
+                if v == nil </span><span class="cov0" title="0">{
+                        passedArguments[i] = reflect.New(funcType.In(i)).Elem()
+                }</span> else<span class="cov8" title="1"> {
+                        passedArguments[i] = reflect.ValueOf(v)
+                }</span>
+        }
+
+        <span class="cov8" title="1">return passedArguments</span>
+}
+
+// WaitAsync waits for all async callbacks to complete
+func (bus *EventBus) WaitAsync() <span class="cov8" title="1">{
+        bus.wg.Wait()
+}</span>
+
+// added lmz
+func (bus *EventBus) Handler(id string, topic string) (interface{}, error) <span class="cov0" title="0">{
+        delete(bus.handlers, id)
+        return bus.handlers, nil
+}</span>
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package eventbus
+
+import (
+        "errors"
+        "net"
+        "net/http"
+        "net/rpc"
+        "sync"
+
+        "github.com/luigizuccarelli/golang-eventbus-grpc/pkg/connectors"
+        "github.com/luigizuccarelli/golang-eventbus-grpc/pkg/schema"
+)
+
+const (
+        Subscribe schema.SubscribeType = iota
+        SubscribeOnce
+        REGISTERSERVICE = "ServerService.Register"
+)
+
+// we have to kee this local
+
+// Server - object capable of being subscribed to by remote handlers
+type Server struct {
+        eventBus    Bus
+        address     string
+        path        string
+        Subscribers map[string][]*schema.SubscribeArg
+        service     *ServerService
+}
+
+// ServerService - service object to listen to remote subscriptions
+type ServerService struct {
+        server  *Server
+        wg      *sync.WaitGroup
+        started bool
+}
+
+// NewServer - create a new Server at the address and path
+func NewServer(address, path string, eventBus Bus) *Server <span class="cov8" title="1">{
+        server := new(Server)
+        server.eventBus = eventBus
+        server.address = address
+        server.path = path
+        server.Subscribers = make(map[string][]*schema.SubscribeArg)
+        server.service = &amp;ServerService{server, &amp;sync.WaitGroup{}, false}
+        return server
+}</span>
+
+// EventBus - returns wrapped event bus
+func (server *Server) EventBus() Bus <span class="cov8" title="1">{
+        return server.eventBus
+}</span>
+
+// rpcCallBack - the callback function must pass the connectors.Connector parameter
+func (server *Server) rpcCallback(subscribeArg *schema.SubscribeArg) func(conn *connectors.Connectors) <span class="cov8" title="1">{
+        return func(conn *connectors.Connectors) </span><span class="cov8" title="1">{
+                client, connErr := conn.DialHttpPath(subscribeArg.ClientAddr, subscribeArg.ClientPath)
+                if connErr != nil </span><span class="cov0" title="0">{
+                        conn.Error("rpcCallback client connection: %v", connErr)
+                        delete(server.Subscribers, subscribeArg.Topic)
+                        conn.Info("rpcCallback subscriber removed: %s", subscribeArg.Topic)
+                        // call the Handler to cleanup
+                        hnd, _ := server.eventBus.Handler(subscribeArg.ClientPath, subscribeArg.Topic)
+                        conn.Info("rpcCallback subscriber remaining: %v", server.Subscribers)
+                        conn.Info("rpcCallback handler remaining: %v", hnd)
+                        return
+                }</span>
+                <span class="cov8" title="1">defer client.Connector.Close()
+                clientArg := new(schema.ClientArg)
+                clientArg.Topic = subscribeArg.Topic
+                clientArg.Args = conn
+                var reply bool
+                err := client.Connector.Call(subscribeArg.ServiceMethod, clientArg, &amp;reply)
+                if err != nil </span><span class="cov0" title="0">{
+                        conn.Error("rcpCallback call : %v", err)
+                }</span>
+        }
+}
+
+// HasClientSubscribed - True if a client subscribed to this server with the same topic
+func (server *Server) HasClientSubscribed(arg *schema.SubscribeArg) bool <span class="cov8" title="1">{
+        if topicSubscribers, ok := server.Subscribers[arg.Topic]; ok </span><span class="cov8" title="1">{
+                for _, topicSubscriber := range topicSubscribers </span><span class="cov8" title="1">{
+                        if *topicSubscriber == *arg </span><span class="cov0" title="0">{
+                                return true
+                        }</span>
+                }
+        }
+        <span class="cov8" title="1">return false</span>
+}
+
+// Start - starts a service for remote clients to subscribe to events
+func (server *Server) Start(conn connectors.Clients) error <span class="cov8" title="1">{
+        var err error
+        service := server.service
+        if !service.started </span><span class="cov8" title="1">{
+                rpcServer := rpc.NewServer()
+                rpcServer.Register(service)
+                rpcServer.HandleHTTP(server.path, "/debug"+server.path)
+                l, e := net.Listen("tcp", server.address)
+                if e != nil </span><span class="cov0" title="0">{
+                        err = e
+                        conn.Error("Function Start : listen error: %v", e)
+                }</span>
+                <span class="cov8" title="1">service.started = true
+                service.wg.Add(1)
+                go http.Serve(l, nil)
+                conn.Info("Function Start : rpc server started %s", server.address)</span>
+        } else<span class="cov0" title="0"> {
+                err = errors.New("server bus already started")
+        }</span>
+        <span class="cov8" title="1">return err</span>
+}
+
+// Stop - signal for the service to stop serving
+func (server *Server) Stop() <span class="cov8" title="1">{
+        service := server.service
+        if service.started </span><span class="cov8" title="1">{
+                service.wg.Done()
+                service.started = false
+        }</span>
+}
+
+// Register - Registers a remote handler to this event bus
+// for a remote subscribe - a given client address only needs to subscribe once
+// event will be republished in local event bus
+func (service *ServerService) Register(arg *schema.SubscribeArg, success *bool) error <span class="cov8" title="1">{
+        subscribers := service.server.Subscribers
+        if !service.server.HasClientSubscribed(arg) </span><span class="cov8" title="1">{
+                rpcCallback := service.server.rpcCallback(arg)
+                switch arg.SubscribeType </span>{
+                case Subscribe:<span class="cov8" title="1">
+                        service.server.eventBus.Subscribe(arg.ClientPath, arg.Topic, rpcCallback)</span>
+                case SubscribeOnce:<span class="cov8" title="1">
+                        service.server.eventBus.SubscribeOnce(arg.Topic, rpcCallback)</span>
+                }
+                <span class="cov8" title="1">var topicSubscribers []*schema.SubscribeArg
+                if _, ok := subscribers[arg.Topic]; ok </span><span class="cov8" title="1">{
+                        topicSubscribers = []*schema.SubscribeArg{arg}
+                }</span> else<span class="cov8" title="1"> {
+                        topicSubscribers = subscribers[arg.Topic]
+                        topicSubscribers = append(topicSubscribers, arg)
+                }</span>
+                <span class="cov8" title="1">subscribers[arg.Topic] = topicSubscribers</span>
+        }
+        <span class="cov8" title="1">*success = true
+        return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package handlers
 
 import (
         "bytes"
@@ -80,8 +591,9 @@ import (
         "net/http"
         "os"
 
-        "gitea-cicd.apps.aws2-dev.ocp.14west.io/cicd/golang-simple-oc4service/pkg/connectors"
-        "gitea-cicd.apps.aws2-dev.ocp.14west.io/cicd/golang-simple-oc4service/pkg/schema"
+        "github.com/luigizuccarelli/golang-eventbus-grpc/pkg/connectors"
+        "github.com/luigizuccarelli/golang-eventbus-grpc/pkg/eventbus"
+        "github.com/luigizuccarelli/golang-eventbus-grpc/pkg/schema"
 )
 
 const (
@@ -89,7 +601,8 @@ const (
         APPLICATIONJSON string = "application/json"
 )
 
-func EchoHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients) <span class="cov8" title="1">{
+// ServiceHandler - uses the client connection and rpcServer as parameters
+func ServiceHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients, rpcServer *eventbus.Server) <span class="cov8" title="1">{
         var response *schema.Response
         var req *schema.Request
 
@@ -99,7 +612,7 @@ func EchoHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients
         }</span>
         <span class="cov8" title="1">body, err := ioutil.ReadAll(r.Body)
         if err != nil </span><span class="cov8" title="1">{
-                msg := "EchoHandler body data error %v"
+                msg := "ServiceHandler body data error %v"
                 b := responseErrorFormat(http.StatusInternalServerError, w, msg, err)
                 fmt.Fprintf(w, string(b))
                 return
@@ -110,7 +623,7 @@ func EchoHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients
         // unmarshal result from mw backend
         errs := json.Unmarshal(body, &amp;req)
         if errs != nil </span><span class="cov8" title="1">{
-                msg := "EchoHandler could not unmarshal input data from servisBOT to schema %v"
+                msg := "ServiceHandler could not unmarshal input data to schema %v"
                 conn.Error(msg, errs)
                 b := responseErrorFormat(http.StatusInternalServerError, w, msg, errs)
                 fmt.Fprintf(w, string(b))
@@ -118,8 +631,14 @@ func EchoHandler(w http.ResponseWriter, r *http.Request, conn connectors.Clients
         }</span>
         <span class="cov8" title="1">response = &amp;schema.Response{Code: http.StatusOK, Status: "OK", Message: req.Message}
         b, _ := json.MarshalIndent(response, "", "        ")
-        conn.Debug(fmt.Sprintf("EchoHandler response : %s", string(b)))
-        fmt.Fprintf(w, string(b))</span>
+        conn.Debug(fmt.Sprintf("ServiceHandler response : %s", string(b)))
+        // we got here so this means we can fire off our publish events
+        // iterate through each suscriber topic
+        for topic, _ := range rpcServer.Subscribers </span><span class="cov0" title="0">{
+                rpcServer.EventBus().Publish(topic, conn)
+                conn.Info("ServiceHandler published event for topic %s", topic)
+        }</span>
+        <span class="cov8" title="1">fmt.Fprintf(w, "%s", string(b))</span>
 }
 
 func IsAlive(w http.ResponseWriter, r *http.Request) <span class="cov8" title="1">{
@@ -150,7 +669,7 @@ func responseErrorFormat(code int, w http.ResponseWriter, msg string, val ...int
 }</span>
 </pre>
 		
-		<pre class="file" id="file1" style="display: none">package validator
+		<pre class="file" id="file4" style="display: none">package validator
 
 import (
         "fmt"
@@ -172,7 +691,7 @@ func checkEnvar(item string, logger *simple.Logger) error <span class="cov8" tit
                         return fmt.Errorf(fmt.Sprintf("%s envar is mandatory please set it", name))
                 }</span>
 
-                <span class="cov8" title="1">logger.Error(fmt.Sprintf("%s envar is empty please set it", name))</span>
+                <span class="cov0" title="0">logger.Error(fmt.Sprintf("%s envar is empty please set it", name))</span>
         }
         <span class="cov8" title="1">return nil</span>
 }
@@ -185,6 +704,8 @@ func ValidateEnvars(logger *simple.Logger) error <span class="cov8" title="1">{
                 "NAME,false",
                 "SERVER_PORT,true",
                 "VERSION,true",
+                "RPCSERVER_PORT,true",
+                "GRPCSERVER_ADDRESS,true",
         }
         for x := range items </span><span class="cov8" title="1">{
                 if err := checkEnvar(items[x], logger); err != nil </span><span class="cov8" title="1">{

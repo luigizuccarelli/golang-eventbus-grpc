@@ -6,4 +6,5 @@ type Clients interface {
 	Info(string, ...interface{})
 	Debug(string, ...interface{})
 	Trace(string, ...interface{})
+	DialHttpPath(addr string, path string) (*RPCClient, error)
 }

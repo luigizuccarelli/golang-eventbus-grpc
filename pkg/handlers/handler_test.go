@@ -9,7 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"gitea-devops-shared-threefld-cicd.apps.c4.us-east-1.dev.aws.ocp.14west.io/threefld/golang-simple-oc4service/pkg/connectors"
+	"github.com/luigizuccarelli/golang-eventbus-grpc/pkg/connectors"
+	"github.com/luigizuccarelli/golang-eventbus-grpc/pkg/eventbus"
 	"github.com/microlib/simple"
 )
 
@@ -43,15 +44,17 @@ func TestAllMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("EchoHandler : should pass", func(t *testing.T) {
+	t.Run("ServiceHandler : should pass", func(t *testing.T) {
 		var STATUS int = 200
 		requestPayload := `{  "id": "12345566", "message": "Hello World - from Luigi" }`
 		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
 		rr := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/v1/echo", bytes.NewBuffer([]byte(requestPayload)))
 		con := connectors.NewTestConnectors(logger)
+		bus := eventbus.New()
+		rpc := eventbus.NewServer(":7000", "_/test_", bus)
 		handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			EchoHandler(w, req, con)
+			ServiceHandler(w, req, con, rpc)
 		})
 		handler.ServeHTTP(rr, req)
 		body, e := ioutil.ReadAll(rr.Body)
@@ -65,14 +68,16 @@ func TestAllMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("EchoHandler : should fail (force readall error)", func(t *testing.T) {
+	t.Run("ServiceHandler : should fail (force readall error)", func(t *testing.T) {
 		var STATUS int = 500
 		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
 		rr := httptest.NewRecorder()
-		req, _ := http.NewRequest("POST", "/api/v1/echo", errReader(0))
+		req, _ := http.NewRequest("POST", "/api/v1/service", errReader(0))
 		con := connectors.NewTestConnectors(logger)
+		bus := eventbus.New()
+		rpc := eventbus.NewServer(":7000", "_/test_", bus)
 		handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			EchoHandler(w, req, con)
+			ServiceHandler(w, req, con, rpc)
 		})
 		handler.ServeHTTP(rr, req)
 		body, e := ioutil.ReadAll(rr.Body)
@@ -82,19 +87,21 @@ func TestAllMiddleware(t *testing.T) {
 		logger.Trace(fmt.Sprintf("Response %s", string(body)))
 		// ignore errors here
 		if rr.Code != STATUS {
-			t.Errorf(fmt.Sprintf("Handler %s returned with incorrect status code - got (%d) wanted (%d)", "EchoHandler", rr.Code, STATUS))
+			t.Errorf(fmt.Sprintf("Handler %s returned with incorrect status code - got (%d) wanted (%d)", "ServiceHandler", rr.Code, STATUS))
 		}
 	})
 
-	t.Run("EchoHandler : should fail (bad json)", func(t *testing.T) {
+	t.Run("ServiceHandler : should fail (bad json)", func(t *testing.T) {
 		var STATUS int = 500
 		requestPayload := `{  "id": "12345566", " }`
 		// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
 		rr := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/v1/echo", bytes.NewBuffer([]byte(requestPayload)))
 		con := connectors.NewTestConnectors(logger)
+		bus := eventbus.New()
+		rpc := eventbus.NewServer(":7000", "_/test_", bus)
 		handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			EchoHandler(w, req, con)
+			ServiceHandler(w, req, con, rpc)
 		})
 		handler.ServeHTTP(rr, req)
 		body, e := ioutil.ReadAll(rr.Body)
@@ -104,8 +111,7 @@ func TestAllMiddleware(t *testing.T) {
 		logger.Trace(fmt.Sprintf("Response %s", string(body)))
 		// ignore errors here
 		if rr.Code != STATUS {
-			t.Errorf(fmt.Sprintf("Handler %s returned with incorrect status code - got (%d) wanted (%d)", "EchoHandler", rr.Code, STATUS))
+			t.Errorf(fmt.Sprintf("Handler %s returned with incorrect status code - got (%d) wanted (%d)", "ServiceHandler", rr.Code, STATUS))
 		}
 	})
-
 }
