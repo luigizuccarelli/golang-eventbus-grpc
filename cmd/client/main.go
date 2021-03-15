@@ -34,7 +34,7 @@ func webhook(conn *connectors.Connectors) {
 		Id:      int64(456),
 		Name:    string("Grpc-Demo"),
 		Status:  string("OK"),
-		Payload: string("{\"message\":\"dude this sh*t is working\"}"),
+		Payload: string(`{"message":"dude what can I say this sh*t is working"}`),
 	}
 	if responseMessage, e := c.Get(context.Background(), &dataschemaModel); e != nil {
 		conn.Error("Function webhook response from server %v", e)
